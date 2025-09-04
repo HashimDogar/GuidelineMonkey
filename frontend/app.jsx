@@ -81,12 +81,15 @@ function App() {
   const [result, setResult] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState(null);
+  const [elapsed, setElapsed] = React.useState(0);
+  const timerRef = React.useRef(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setResult(null);
+    setElapsed(0);
     try {
       const res = await fetch("/api/guidelines", {
         method: "POST",
@@ -102,6 +105,27 @@ function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  React.useEffect(() => {
+    if (loading) {
+      timerRef.current = setInterval(() => {
+        setElapsed((e) => e + 1);
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    return () => clearInterval(timerRef.current);
+  }, [loading]);
+
+  function formatElapsed(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins > 0) {
+      return `${seconds}s (${mins}m ${secs}s)`;
+    }
+    return `${seconds}s`;
   }
 
   return (
@@ -124,7 +148,10 @@ function App() {
         </button>
       </form>
 
-      {loading && <div className="status">Loading…</div>}
+      {loading && <div className="status">Loading… {formatElapsed(elapsed)}</div>}
+      {!loading && !error && result && (
+        <div className="status">Completed in {formatElapsed(elapsed)}</div>
+      )}
       {error && <div className="alert">{error}</div>}
 
       {result && (
