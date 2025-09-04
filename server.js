@@ -29,10 +29,7 @@ const norm = s =>
   
   Schema:
   {
-    "summary": {
-      "Overview" : string[],
-      "recommended_investigations": string[],
-      "recommended_management": string[]
+    "summary": string,
     "local": {
       "guideline": {
         "title": string,
