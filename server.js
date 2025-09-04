@@ -29,7 +29,10 @@ const norm = s =>
   
   Schema:
   {
-    "summary": string,
+    "summary": {
+      "Overview" : string[],
+      "recommended_investigations": string[],
+      "recommended_management": string[]
     "local": {
       "guideline": {
         "title": string,
@@ -73,7 +76,7 @@ const norm = s =>
   `;
   
     // Ask Ollama; format:'json' helps some models be strict; ok to remove if your build errors
-    const body = { model: 'llama3.1:8b', prompt, stream: false, format: 'json', options: { temperature: 0 } };
+    const body = { model: 'llama3', prompt, stream: false, format: 'json', options: { temperature: 0 } };
   
     const resp = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
