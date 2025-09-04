@@ -1,130 +1,79 @@
-
 /* global React, ReactDOM */
-/**
- * Guideline Monkey — structured output renderer
- *
- * EXPECTED RESPONSE SHAPE FROM /api/guidelines
- * -------------------------------------------------
- * {
- *   "summary": "string",
- *   "local": {
- *     "decision_tree": [
- *        { "if": "string", "then": "string", "note": "optional string" }
- *     ],
- *     "recommended_investigations": ["string", ...],
- *     "recommended_management": ["string", ...],
- *     "links": [ { "title": "string", "url": "https://..." }, ... ],
- *     "guideline": {
- *        "title": "Specific local guideline matched (or most applicable)",
- *        "summary": "short summary",
- *        "url": "https://...",
- *        "applicability": "specific | most_applicable | none"
- *     }
- *   },
- *   "national": {
- *     "nice_summary": "string",
- *     "recommended_investigations": ["string", ...],
- *     "recommended_management": ["string", ...],
- *     "cks_link": "https://..."
- *   },
- *   "systematic_review": {
- *     "summary": "string",
- *     "link": "https://...",
- *     "citation": "optional string"
- *   }
- * }
- *
- * This component is backwards-compatible with your previous, simpler shape
- * (summary + arrays of {title, link}). If the structured fields are missing,
- * it will gracefully render whatever is available.
- */
 
-function Section({ title, children }) {
-  return (
-    <section className="mt-8">
-      <h2 className="text-xl font-semibold mb-3">{title}</h2>
-      <div className="space-y-2">{children}</div>
-    </section>
-  );
+function Badge({ tone = "default", children }) {
+  const toneClass =
+    tone === "ok" ? "badge badge--ok" :
+    tone === "warn" ? "badge badge--warn" :
+    tone === "danger" ? "badge badge--danger" :
+    "badge";
+  return <span className={toneClass}>{children}</span>;
+}
+
+function ApplicabilityBadge({ applicability }) {
+  if (!applicability) return null;
+  const map = {
+    specific: { label: "Specific guideline", tone: "ok" },
+    most_applicable: { label: "Most applicable", tone: "warn" },
+    none: { label: "No applicable local guideline", tone: "danger" }
+  };
+  const v = map[applicability] || { label: applicability, tone: "default" };
+  return <Badge tone={v.tone}>{v.label}</Badge>;
 }
 
 function LinkList({ items }) {
-  if (!items || !items.length) return null;
+  if (!items || !items.length) return <p className="small">No links.</p>;
   return (
-    <ul className="list-disc pl-5 space-y-1">
+    <ul className="list list--tight">
       {items.map((g, i) => (
         <li key={i}>
-          {g.url ? (
-            <a className="underline" href={g.url} target="_blank" rel="noreferrer">
-              {g.title || g.url}
-            </a>
-          ) : (
-            <a className="underline" href={g.link} target="_blank" rel="noreferrer">
-              {g.title || g.link}
-            </a>
-          )}
+          <a className="link" href={(g.url || g.link)} target="_blank" rel="noreferrer">
+            {g.title || g.url || g.link}
+          </a>
         </li>
       ))}
     </ul>
   );
 }
 
-function Bullets({ items, emptyLabel = "—" }) {
+function Bullets({ items }) {
   if (!items) return null;
-  if (Array.isArray(items) && items.length === 0) return <p>{emptyLabel}</p>;
+  if (Array.isArray(items) && items.length === 0) return <p className="small">—</p>;
   if (Array.isArray(items)) {
     return (
-      <ul className="list-disc pl-5 space-y-1">
-        {items.map((x, idx) => (
-          <li key={idx}>{x}</li>
-        ))}
+      <ul className="list">
+        {items.map((x, i) => <li key={i}>{x}</li>)}
       </ul>
     );
   }
-  // allow string fallback
   return <p>{String(items)}</p>;
 }
 
 function DecisionTree({ steps }) {
   if (!steps || !steps.length) return null;
   return (
-    <ol className="list-decimal pl-5 space-y-2">
+    <div className="tree">
       {steps.map((s, i) => (
-        <li key={i}>
-          <div>
-            <span className="font-medium">IF</span> {s.if || s.condition || "—"} {" "}
-            <span className="font-medium">THEN</span> {s.then || s.action || "—"}
-            {s.note ? <span className="block text-sm text-gray-600">Note: {s.note}</span> : null}
-          </div>
-        </li>
+        <div className="tree__item" key={i}>
+          <span className="tree__if">IF</span> {s.if || s.condition || "—"}{" "}
+          <span className="tree__if">THEN</span> {s.then || s.action || "—"}
+          {s.note ? <div className="tree__note">Note: {s.note}</div> : null}
+        </div>
       ))}
-    </ol>
+    </div>
   );
 }
 
-function Badge({ children, tone = "default" }) {
-  const tones = {
-    default: "bg-gray-100 text-gray-800",
-    match: "bg-green-100 text-green-800",
-    fallback: "bg-amber-100 text-amber-900",
-    none: "bg-red-100 text-red-800",
-  };
+function Card({ title, subtitle, className = "", headerExtras = null, children }) {
   return (
-    <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${tones[tone] || tones.default}`}>
+    <section className={`card ${className}`}>
+      <div className="card__header">
+        <h2 className="card__title">{title}</h2>
+        {headerExtras}
+      </div>
+      {subtitle ? <p className="card__sub">{subtitle}</p> : null}
       {children}
-    </span>
+    </section>
   );
-}
-
-function ApplicabilityBadge({ applicability }) {
-  if (!applicability) return null;
-  const map = {
-    specific: { label: "Specific guideline", tone: "match" },
-    most_applicable: { label: "Most applicable guideline", tone: "fallback" },
-    none: { label: "No applicable guideline", tone: "none" },
-  };
-  const v = map[applicability] || { label: applicability };
-  return <Badge tone={v.tone}>{v.label}</Badge>;
 }
 
 function App() {
@@ -142,7 +91,7 @@ function App() {
       const res = await fetch("/api/guidelines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -156,162 +105,143 @@ function App() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Guideline Monkey</h1>
+    <div className="container">
+      <header className="app-header">
+        <div>
+          <h1 className="app-title">Guideline Monkey</h1>
+          <p className="app-subtitle">Local → NICE → Cochrane — concise, actionable guidance</p>
+        </div>
+      </header>
 
-      <form onSubmit={handleSubmit} className="flex items-center gap-2 mb-4">
+      <form className="search" onSubmit={handleSubmit}>
         <input
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Enter clinical question (e.g., 'Adult with COPD exacerbation in ED')"
-          className="flex-1 border rounded-lg px-3 py-2"
+          placeholder="Enter clinical question (e.g., ‘Adult with COPD exacerbation in ED’)"
         />
-        <button
-          type="submit"
-          disabled={loading || !prompt.trim()}
-          className="px-4 py-2 rounded-lg bg-black text-white disabled:opacity-50"
-        >
+        <button type="submit" disabled={loading || !prompt.trim()}>
           {loading ? "Searching…" : "Search"}
         </button>
       </form>
 
-      {loading && <p className="text-sm text-gray-600">Loading…</p>}
-      {error && (
-        <div className="border border-red-200 bg-red-50 text-red-800 rounded-lg p-3 mb-4">
-          {error}
-        </div>
-      )}
+      {loading && <div className="status">Loading…</div>}
+      {error && <div className="alert">{error}</div>}
 
       {result && (
-        <div className="space-y-6">
+        <div className="results-grid">
           {/* SUMMARY */}
-          {result.summary && (
-            <Section title="Summary">
-              <p className="leading-relaxed">{result.summary}</p>
-            </Section>
-          )}
+          <Card title="Summary" className="card--summary">
+            {result.summary ? (
+              <p className="m6">{result.summary}</p>
+            ) : (
+              <p className="small">No summary returned.</p>
+            )}
+          </Card>
 
-          {/* LOCAL GUIDELINES */}
-          <Section title="Local guidelines">
-            {result?.local?.guideline && (
-              <div className="border rounded-lg p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-medium">{result.local.guideline.title}</h3>
+          {/* LOCAL */}
+          <Card
+            title="Local guidelines"
+            headerExtras={
+              result?.local?.guideline?.applicability ? (
+                <div className="badges">
                   <ApplicabilityBadge applicability={result.local.guideline.applicability} />
                 </div>
+              ) : null
+            }
+          >
+            {result?.local?.guideline && (
+              <>
+                <p className="m6">
+                  <strong>{result.local.guideline.title}</strong>
+                  {result.local.guideline.url ? (
+                    <> — <a className="link-muted" href={result.local.guideline.url} target="_blank" rel="noreferrer">Open</a></>
+                  ) : null}
+                </p>
                 {result.local.guideline.summary && (
-                  <p className="text-sm text-gray-700 mb-2">{result.local.guideline.summary}</p>
+                  <p className="small m8">{result.local.guideline.summary}</p>
                 )}
-                {result.local.guideline.url && (
-                  <a
-                    className="text-sm underline"
-                    href={result.local.guideline.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open guideline
-                  </a>
-                )}
-              </div>
+                <hr className="sep" />
+              </>
             )}
 
-            {/* Decision tree */}
             {result?.local?.decision_tree && result.local.decision_tree.length > 0 && (
-              <div>
-                <h4 className="font-medium mb-1">Decision tree</h4>
+              <>
+                <h3 className="m6">Decision tree</h3>
                 <DecisionTree steps={result.local.decision_tree} />
-              </div>
+              </>
             )}
 
-            {/* Recommended investigations */}
             {(result?.local?.recommended_investigations || result?.local?.investigations) && (
-              <div>
-                <h4 className="font-medium mb-1">Recommended investigations</h4>
+              <>
+                <h3 className="m8">Recommended investigations</h3>
                 <Bullets items={result.local.recommended_investigations || result.local.investigations} />
-              </div>
+              </>
             )}
 
-            {/* Recommended management */}
             {(result?.local?.recommended_management || result?.local?.management) && (
-              <div>
-                <h4 className="font-medium mb-1">Recommended management</h4>
+              <>
+                <h3 className="m8">Recommended management</h3>
                 <Bullets items={result.local.recommended_management || result.local.management} />
-              </div>
+              </>
             )}
 
-            {/* Links for most applicable guidelines (up to 3) */}
-            {(result?.local?.links || result?.local) && (
-              <div>
-                <h4 className="font-medium mb-1">Links (top 3)</h4>
-                <LinkList items={(result.local.links || result.local).slice?.(0, 3) || []} />
-              </div>
+            {(result?.local?.links || Array.isArray(result?.local)) && (
+              <>
+                <h3 className="m8">Links (top 3)</h3>
+                {Array.isArray(result?.local)
+                  ? <LinkList items={result.local} />
+                  : <LinkList items={result.local.links} />}
+              </>
             )}
+          </Card>
 
-            {/* Back-compat with old shape: result.local as array of {title, link} */}
-            {Array.isArray(result?.local) && (
-              <div>
-                <h4 className="font-medium mb-1">Local guideline links</h4>
-                <LinkList items={result.local} />
-              </div>
-            )}
-          </Section>
-
-          {/* NATIONAL (NICE) */}
-          <Section title="National guidelines (NICE)">
-            {result?.national?.nice_summary && (
-              <p className="mb-2">{result.national.nice_summary}</p>
-            )}
+          {/* NATIONAL */}
+          <Card title="National guidelines (NICE)">
+            {result?.national?.nice_summary && <p className="m6">{result.national.nice_summary}</p>}
             {(result?.national?.recommended_investigations || result?.national?.investigations) && (
-              <div>
-                <h4 className="font-medium mb-1">Recommended investigations</h4>
+              <>
+                <h3 className="m8">Recommended investigations</h3>
                 <Bullets items={result.national.recommended_investigations || result.national.investigations} />
-              </div>
+              </>
             )}
             {(result?.national?.recommended_management || result?.national?.management) && (
-              <div>
-                <h4 className="font-medium mb-1">Recommended management</h4>
+              <>
+                <h3 className="m8">Recommended management</h3>
                 <Bullets items={result.national.recommended_management || result.national.management} />
-              </div>
+              </>
             )}
             {result?.national?.cks_link && (
-              <p className="mt-2">
-                <a className="underline" href={result.national.cks_link} target="_blank" rel="noreferrer">
+              <p className="m8">
+                <a className="link" href={result.national.cks_link} target="_blank" rel="noreferrer">
                   NICE CKS — most relevant page
                 </a>
               </p>
             )}
 
-            {/* Back-compat with old shape */}
-            {Array.isArray(result?.national) && (
-              <div className="mt-2">
-                <LinkList items={result.national} />
-              </div>
-            )}
-          </Section>
+            {/* Back-compat */}
+            {Array.isArray(result?.national) && <LinkList items={result.national} />}
+          </Card>
 
           {/* SYSTEMATIC REVIEW */}
-          <Section title="Systematic review (Cochrane)">
-            {result?.systematic_review?.summary && (
-              <p className="mb-2">{result.systematic_review.summary}</p>
-            )}
+          <Card title="Systematic review (Cochrane)">
+            {result?.systematic_review?.summary ? (
+              <p className="m6">{result.systematic_review.summary}</p>
+            ) : <p className="small">No summary returned.</p>}
+
             {result?.systematic_review?.citation && (
-              <p className="text-sm text-gray-700">{result.systematic_review.citation}</p>
+              <p className="small muted">{result.systematic_review.citation}</p>
             )}
             {result?.systematic_review?.link && (
-              <p className="mt-2">
-                <a className="underline" href={result.systematic_review.link} target="_blank" rel="noreferrer">
+              <p className="m8">
+                <a className="link" href={result.systematic_review.link} target="_blank" rel="noreferrer">
                   Open systematic review
                 </a>
               </p>
             )}
 
-            {/* Back-compat with old shape */}
-            {Array.isArray(result?.systematic_reviews) && (
-              <div className="mt-2">
-                <LinkList items={result.systematic_reviews} />
-              </div>
-            )}
-          </Section>
+            {/* Back-compat */}
+            {Array.isArray(result?.systematic_reviews) && <LinkList items={result.systematic_reviews} />}
+          </Card>
         </div>
       )}
     </div>
