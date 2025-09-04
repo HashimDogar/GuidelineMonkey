@@ -1,0 +1,12 @@
+{
+  "name": "guideline-monkey",
+  "version": "1.0.0",
+  "description": "Web app to fetch clinical guidelines using Phi-3 Mini",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node -e \"console.log('No tests specified')\""
+  },
+  "author": "",
+  "license": "MIT"
+}
