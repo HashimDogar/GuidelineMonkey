@@ -43,6 +43,7 @@ const norm = s =>
       "links": [{"title": string, "url": string}]
     },
     "national": {
+      "decision_tree": [{"if": string, "then": string, "note"?: string}],
       "nice_summary": string,
       "recommended_investigations": string[],
       "recommended_management": string[],
