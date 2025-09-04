@@ -1,6 +1,5 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
 
+/* global React, ReactDOM */
 /**
  * Guideline Monkey — structured output renderer
  *
