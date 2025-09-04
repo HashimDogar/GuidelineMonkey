@@ -22,77 +22,109 @@ function findLocalGuidelines(query) {
 const norm = s =>
   (s || '').toLowerCase().replace(/[\s_-]+/g, '').replace(/[^a-z0-9]/g, '');
 
-async function callPhi3Structured(userQuery, localTitles) {
-  const prompt = `
-You are Guideline Monkey. Answer UK-clinically with priority: Local → NICE → Cochrane.
-Return ONLY valid JSON (UTF-8), no markdown, no backticks, no commentary.
-
-Schema:
-{
-  "summary": string,
-  "local": {
-    "guideline": {
-      "title": string,
-      "summary": string,
-      "url": string,
-      "applicability": "specific" | "most_applicable" | "none"
-    },
-    "decision_tree": [{"if": string, "then": string, "note"?: string}],
-    "recommended_investigations": string[],
-    "recommended_management": string[],
-    "links": [{"title": string, "url": string}]
-  },
-  "national": {
-    "nice_summary": string,
-    "recommended_investigations": string[],
-    "recommended_management": string[],
-    "cks_link": string
-  },
-  "systematic_review": {
+  async function callPhi3Structured(userQuery, localTitles) {
+    const prompt = `
+  You are Guideline Monkey. Answer UK-clinically with priority: Local → NICE → Cochrane.
+  Return ONLY a single minified JSON object. No markdown. No code fences. No comments. No trailing commas.
+  
+  Schema:
+  {
     "summary": string,
-    "link": string,
-    "citation"?: string
-  }
-}
-
-Rules:
-- Bind local + national guidance in the top-level "summary" (2–5 sentences). Cite key RCTs or reviews briefly.
-- Local: If a specific local guideline exists, set applicability="specific"; else use the most applicable and set applicability="most_applicable"; if none, set applicability="none".
-- Provide a practical decision_tree of IF/THEN steps (2–6 items).
-- National: Summarise NICE for the exact query; list investigations and management succinctly; include the most relevant NICE CKS link.
-- Systematic_review: Select the single most relevant Cochrane review and summarise.
-- Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.
-- Output MUST be strictly valid JSON.
-
-User query:
-${userQuery}
-
-Available local guideline titles (choose one if applicable; use the exact title):
-${localTitles.map(t => `- ${t}`).join('\n')}
-`;
-
-  const body = { model: 'phi3:mini', prompt, stream: false };
-  const resp = await fetch('http://localhost:11434/api/generate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!resp.ok) throw new Error(`Ollama error ${resp.status}`);
-  const data = await resp.json();
-  let text = (data.response || '').trim();
-
-  // parse as JSON, fallback to first {...} block
-  try {
-    return JSON.parse(text);
-  } catch {
-    const first = text.indexOf('{');
-    const last = text.lastIndexOf('}');
-    if (first !== -1 && last !== -1) {
-      return JSON.parse(text.slice(first, last + 1));
+    "local": {
+      "guideline": {
+        "title": string,
+        "summary": string,
+        "url": string,
+        "applicability": "specific" | "most_applicable" | "none"
+      },
+      "decision_tree": [{"if": string, "then": string, "note"?: string}],
+      "recommended_investigations": string[],
+      "recommended_management": string[],
+      "links": [{"title": string, "url": string}]
+    },
+    "national": {
+      "nice_summary": string,
+      "recommended_investigations": string[],
+      "recommended_management": string[],
+      "cks_link": string
+    },
+    "systematic_review": {
+      "summary": string,
+      "link": string,
+      "citation"?: string
     }
+  }
+  
+  Rules:
+  - Bind local + national guidance in the top-level "summary" (2–5 sentences). Cite key RCTs or reviews briefly.
+  - Local: If a specific local guideline exists, set applicability="specific"; else use the most applicable and set applicability="most_applicable"; if none, set applicability="none".
+  - Provide a practical decision_tree of IF/THEN steps (2–6 items).
+  - National: Summarise NICE for the exact query; list investigations and management succinctly; include the most relevant NICE CKS link.
+  - Systematic_review: Select the single most relevant Cochrane review and summarise.
+  - Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.
+  - Output MUST be strictly valid JSON.
+  
+  User query:
+  ${userQuery}
+  
+  Available local guideline titles (choose one if applicable; use the exact title):
+  ${localTitles.map(t => `- ${t}`).join('\n')}
+  `;
+  
+    // Ask Ollama; format:'json' helps some models be strict; ok to remove if your build errors
+    const body = { model: 'phi3:mini', prompt, stream: false, format: 'json', options: { temperature: 0 } };
+  
+    const resp = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error(`Ollama error ${resp.status}`);
+    const data = await resp.json();
+    const raw = (data.response || '').trim();
+  
+    // Robust parse: try JSON → fenced blocks → first {...} → JSON5 → trailing comma fix
+    const tryParseStrict = (s) => { try { return JSON.parse(s); } catch { return null; } };
+    const tryParseJSON5  = (s) => { try { return JSON5.parse(s); } catch { return null; } };
+  
+    // 1) direct
+    let obj = tryParseStrict(raw);
+    if (obj) return obj;
+  
+    // 2) ```json ... ```
+    const fence = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/);
+    if (fence && fence[1]) {
+      obj = tryParseStrict(fence[1].trim()) || tryParseJSON5(fence[1].trim());
+      if (obj) return obj;
+    }
+  
+    // 3) between <json>...</json>
+    const tag = raw.match(/<json>([\s\S]*?)<\/json>/i);
+    if (tag && tag[1]) {
+      obj = tryParseStrict(tag[1].trim()) || tryParseJSON5(tag[1].trim());
+      if (obj) return obj;
+    }
+  
+    // 4) first {...last}
+    const first = raw.indexOf('{');
+    const last  = raw.lastIndexOf('}');
+    if (first !== -1 && last !== -1 && last > first) {
+      const slice = raw.slice(first, last + 1);
+      obj = tryParseStrict(slice) || tryParseJSON5(slice);
+      if (obj) return obj;
+  
+      // 5) quick trailing-comma fixer then retry
+      const noTrailingCommas = slice.replace(/,\s*([}\]])/g, '$1');
+      obj = tryParseStrict(noTrailingCommas) || tryParseJSON5(noTrailingCommas);
+      if (obj) return obj;
+    }
+  
+    // Log a snippet for debugging and throw
+    console.error('Model output (first 800 chars):\n', raw.slice(0, 800));
     throw new Error('Model did not return valid JSON.');
   }
-}
+  
+
 
 // ---- server ----
 const server = http.createServer(async (req, res) => {

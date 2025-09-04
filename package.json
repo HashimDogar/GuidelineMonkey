@@ -8,5 +8,8 @@
     "test": "node -e \"console.log('No tests specified')\""
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "json5": "^2.2.3"
+  }
 }
