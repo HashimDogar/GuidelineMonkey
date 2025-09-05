@@ -36,6 +36,25 @@ function LinkList({ items }) {
   );
 }
 
+function PaperList({ papers }) {
+  if (!papers || !papers.length) return <p className="small">No literature found.</p>;
+  return (
+    <ul className="list list--tight">
+      {papers.map((p, i) => (
+        <li key={i}>
+          <strong>{p.title || p.url}</strong>
+          {p.summary && <p className="small">{p.summary}</p>}
+          <p className="small">
+            <a className="link" href={p.url} target="_blank" rel="noreferrer">
+              View on PubMed
+            </a>
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function Bullets({ items }) {
   if (!items) return null;
   if (Array.isArray(items) && items.length === 0) return <p className="small">—</p>;
@@ -326,7 +345,7 @@ function App() {
           {result.published_literature && (
             <Card title="Published literature">
               {result.published_literature.papers && result.published_literature.papers.length > 0 ? (
-                <LinkList items={result.published_literature.papers} />
+                <PaperList papers={result.published_literature.papers} />
               ) : (
                 <p className="small">No literature found.</p>
               )}

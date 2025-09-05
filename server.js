@@ -166,7 +166,13 @@ async function fetchPubMed(query) {
       } catch (err) {
         console.error(err);
       }
-      out.push({ title, summary, url: `https://pubmed.ncbi.nlm.nih.gov/${id}/` });
+      summary = summary.replace(/\s+/g, ' ').trim();
+      if (summary) {
+        const sentences = summary.split(/(?<=[.!?])\s+/).slice(0, 2);
+        summary = sentences.join(' ');
+      }
+      const url = `https://pubmed.ncbi.nlm.nih.gov/${id}/`;
+      out.push({ title, summary, url });
     }
     return out;
   } catch (e) {
