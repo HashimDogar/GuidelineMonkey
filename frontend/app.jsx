@@ -254,6 +254,13 @@ function App() {
                 </>
               )}
 
+              {result?.local?.admission_criteria && (
+                <>
+                  <h3 className="m8">Admission criteria</h3>
+                  <Bullets items={result.local.admission_criteria} />
+                </>
+              )}
+
               {(result?.local?.recommended_investigations || result?.local?.investigations) && (
                 <>
                   <h3 className="m8">Recommended investigations</h3>
@@ -283,6 +290,12 @@ function App() {
           {result.national && (
             <Card title="National guidelines (NICE)">
               {result?.national?.nice_summary && <p className="m6">{result.national.nice_summary}</p>}
+              {result?.national?.admission_criteria && (
+                <>
+                  <h3 className="m8">Admission criteria</h3>
+                  <Bullets items={result.national.admission_criteria} />
+                </>
+              )}
               {(result?.national?.recommended_investigations || result?.national?.investigations) && (
                 <>
                   <h3 className="m8">Recommended investigations</h3>

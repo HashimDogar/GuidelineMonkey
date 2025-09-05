@@ -26,10 +26,10 @@ const norm = s =>
 async function callPhi3Structured(userQuery, localTitles, include = {}) {
   const sections = [];
   if (include.local) {
-    sections.push(`"local": {\n      "guideline": {"title": string, "summary": string, "url": string, "applicability": "specific" | "most_applicable" | "none"},\n      "decision_tree": [{"if": string, "then": string, "note"?: string}],\n      "recommended_investigations": string[],\n      "recommended_management": string[],\n      "links": [{"title": string, "url": string}]\n    }`);
+    sections.push(`"local": {\n      "guideline": {"title": string, "summary": string, "url": string, "applicability": "specific" | "most_applicable" | "none"},\n      "decision_tree": [{"if": string, "then": string, "note"?: string}],\n      "admission_criteria": string[],\n      "recommended_investigations": string[],\n      "recommended_management": string[],\n      "links": [{"title": string, "url": string}]\n    }`);
   }
   if (include.national) {
-    sections.push(`"national": {\n      "decision_tree": [{"if": string, "then": string, "note"?: string}],\n      "nice_summary": string,\n      "recommended_investigations": string[],\n      "recommended_management": string[],\n      "cks_link": string\n    }`);
+    sections.push(`"national": {\n      "decision_tree": [{"if": string, "then": string, "note"?: string}],\n      "nice_summary": string,\n      "admission_criteria": string[],\n      "recommended_investigations": string[],\n      "recommended_management": string[],\n      "cks_link": string\n    }`);
   }
   const schema = `{
     "summary": string${sections.length ? ',\n    ' + sections.join(',\n    ') : ''}
@@ -41,9 +41,9 @@ async function callPhi3Structured(userQuery, localTitles, include = {}) {
     if (include.local) bind.push('local');
     if (include.national) bind.push('national');
     rules = `- Bind ${bind.join(' + ')} guidance in the top-level "summary" (2–5 sentences).` +
-      (include.local ? `\n- Local: If a specific local guideline exists, set applicability="specific"; else use the most applicable and set applicability="most_applicable"; if none, set applicability="none".\n- Provide a practical decision_tree of IF/THEN steps (2–6 items).` : '') +
-      (include.national ? `\n- National: Summarise NICE for the exact query; list investigations and management succinctly; include the most relevant NICE CKS link.` : '') +
-      `\n- Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.\n- Output MUST be strictly valid JSON.`;
+      (include.local ? `\n- Local: If a specific local guideline exists, set applicability="specific"; else use the most applicable and set applicability="most_applicable"; if none, set applicability="none".\n- Provide a practical decision_tree of IF/THEN steps (2–6 items).\n- List admission_criteria for when hospital admission is required.` : '') +
+      (include.national ? `\n- National: Summarise NICE for the exact query; list admission_criteria for hospital admission; list investigations and management succinctly; include the most relevant NICE CKS link.` : '') +
+      `\n- Audience: doctors in an acute hospital caring for acutely unwell patients (not primary care).\n- Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.\n- Output MUST be strictly valid JSON.`;
   }
 
   const priority = [include.local && 'Local', include.national && 'NICE'].filter(Boolean).join(' → ');
