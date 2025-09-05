@@ -9,16 +9,26 @@ const localDir = path.join(__dirname, 'local_ocr');
 const frontendDir = path.join(__dirname, 'frontend');
 
 // ---- helpers ----
-function findLocalGuidelines(query) {
+function detectAudience(text = '') {
+  const s = text.toLowerCase();
+  if (/(pregnan|antenatal|obstetric|maternal)/.test(s)) return 'pregnancy';
+  if (/(paedi|pedi|child|infant|neonat)/.test(s)) return 'paediatric';
+  return 'adult';
+}
+
+function findLocalGuidelines(query, audience = 'adult') {
   const terms = (query || '').toLowerCase().split(/\s+/).filter(Boolean);
   const files = fs.existsSync(localDir) ? fs.readdirSync(localDir) : [];
-  return files
+  const matches = files
     .filter(f => terms.some(t => f.toLowerCase().includes(t)))
     .map(f => ({
       title: f.replace(/_ocr\.pdf$/i, '').replace(/_/g, ' '),
       file: f,
-      link: `/local/${encodeURIComponent(f)}`
+      link: `/local/${encodeURIComponent(f)}`,
+      audience: detectAudience(f)
     }));
+  const primary = matches.filter(m => m.audience === audience);
+  return { all: matches, primary };
 }
 const norm = s =>
   (s || '').toLowerCase().replace(/[\s_-]+/g, '').replace(/[^a-z0-9]/g, '');
@@ -118,9 +128,16 @@ async function callPhi3Structured(userQuery, localTitles, include = {}) {
     throw new Error('Model did not return valid JSON.');
   }
 
-async function fetchPubMed(query) {
+async function fetchPubMed(query, audience = 'adult') {
   try {
-    const base = `${query} [Title/Abstract]`;
+    let base = `${query} [Title/Abstract]`;
+    if (audience === 'adult') {
+      base += ' AND adult[MeSH Terms]';
+    } else if (audience === 'paediatric') {
+      base += ' AND (child[MeSH Terms] OR infant[MeSH Terms])';
+    } else if (audience === 'pregnancy') {
+      base += ' AND pregnancy[MeSH Terms]';
+    }
     const ids = [];
 
     async function search(term) {
@@ -200,14 +217,18 @@ const server = http.createServer(async (req, res) => {
           return res.end(JSON.stringify({ error: 'Missing prompt' }));
         }
 
-        // 1) find local PDFs if needed
-        const localMatches = incLocal ? findLocalGuidelines(prompt) : [];
+        const audience = detectAudience(prompt);
+        const { all: allLocalMatches, primary: localMatches } = incLocal
+          ? findLocalGuidelines(prompt, audience)
+          : { all: [], primary: [] };
         const localTitles = localMatches.map(g => g.title);
+
+        const modelPrompt = audience === 'adult' ? `${prompt} in adults` : prompt;
 
         // 2) ask model for structured JSON if local or national requested
         let out = {};
         if (incLocal || incNational) {
-          out = await callPhi3Structured(prompt, localTitles, { local: incLocal, national: incNational });
+          out = await callPhi3Structured(modelPrompt, localTitles, { local: incLocal, national: incNational });
         }
 
         out = out && typeof out === 'object' ? out : {};
@@ -215,7 +236,7 @@ const server = http.createServer(async (req, res) => {
         // 3) enrich local results
         if (incLocal) {
           out.local = out.local && typeof out.local === 'object' ? out.local : {};
-          const links = localMatches.slice(0, 3).map(({ title, link }) => ({ title, url: link }));
+          const links = allLocalMatches.slice(0, 3).map(({ title, link }) => ({ title, url: link }));
           out.local.links = links;
 
           if (out.local.guideline && out.local.guideline.title && !out.local.guideline.url) {
@@ -239,7 +260,7 @@ const server = http.createServer(async (req, res) => {
         if (incNational) {
           out.national = out.national && typeof out.national === 'object' ? out.national : {};
           if (!out.national.cks_link) {
-            out.national.cks_link = `https://cks.nice.org.uk/search?query=${encodeURIComponent(prompt)}`;
+            out.national.cks_link = `https://cks.nice.org.uk/search?query=${encodeURIComponent(modelPrompt)}`;
           }
         } else {
           delete out.national;
@@ -247,7 +268,7 @@ const server = http.createServer(async (req, res) => {
 
         // 5) published literature
         if (incLiterature) {
-          const papers = await fetchPubMed(prompt);
+          const papers = await fetchPubMed(prompt, audience);
           out.published_literature = { papers };
         }
 
