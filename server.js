@@ -120,21 +120,55 @@ async function callPhi3Structured(userQuery, localTitles, include = {}) {
 
 async function fetchPubMed(query) {
   try {
-    const term = encodeURIComponent(query);
-    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${term}&retmode=json&retmax=3&sort=cited`;
-    const sResp = await fetch(searchUrl);
-    if (!sResp.ok) return [];
-    const sData = await sResp.json();
-    const ids = sData.esearchresult?.idlist || [];
+    const base = `${query} [Title/Abstract]`;
+    const ids = [];
+
+    async function search(term) {
+      const url = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(term)}&retmode=json&retmax=5&sort=cited`;
+      const resp = await fetch(url);
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return data.esearchresult?.idlist || [];
+    }
+
+    // Prefer systematic reviews
+    for (const id of await search(`${base} AND systematic[sb]`)) {
+      if (!ids.includes(id)) ids.push(id);
+    }
+
+    // Then fill with randomized controlled trials if needed
+    if (ids.length < 3) {
+      for (const id of await search(`${base} AND randomized controlled trial[pt]`)) {
+        if (!ids.includes(id)) ids.push(id);
+        if (ids.length >= 3) break;
+      }
+    }
+
     if (!ids.length) return [];
+
     const summaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${ids.join(',')}&retmode=json`;
     const sumResp = await fetch(summaryUrl);
     if (!sumResp.ok) return [];
     const sumData = await sumResp.json();
-    return ids.map(id => ({
-      title: sumData.result?.[id]?.title || `PubMed ${id}`,
-      url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`
-    }));
+
+    const out = [];
+    for (const id of ids.slice(0, 3)) {
+      const title = sumData.result?.[id]?.title || `PubMed ${id}`;
+      let summary = '';
+      try {
+        const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${id}&retmode=xml&rettype=abstract`;
+        const fResp = await fetch(efetchUrl);
+        if (fResp.ok) {
+          const text = await fResp.text();
+          const matches = [...text.matchAll(/<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/g)];
+          summary = matches.map(m => m[1]).join(' ').replace(/<[^>]+>/g, '');
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      out.push({ title, summary, url: `https://pubmed.ncbi.nlm.nih.gov/${id}/` });
+    }
+    return out;
   } catch (e) {
     console.error(e);
     return [];

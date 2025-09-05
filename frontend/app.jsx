@@ -29,6 +29,7 @@ function LinkList({ items }) {
           <a className="link" href={(g.url || g.link)} target="_blank" rel="noreferrer">
             {g.title || g.url || g.link}
           </a>
+          {g.summary && <p className="small">{g.summary}</p>}
         </li>
       ))}
     </ul>
