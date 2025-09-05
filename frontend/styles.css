@@ -98,6 +98,36 @@ body{
 }
 .search button:active{ transform: translateY(1px); }
 
+.options{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+
+.option{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border:1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background:#f8fafc;
+  font-size:14px;
+  cursor:pointer;
+  user-select:none;
+}
+
+.option input{
+  width:16px;
+  height:16px;
+  accent-color: var(--accent);
+}
+
+.option--active{
+  background: var(--accent-weak);
+  border-color: var(--accent);
+}
+
 .status{
   font-size:13px; color:var(--muted); margin: 6px 2px 0;
 }

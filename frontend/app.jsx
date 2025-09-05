@@ -170,7 +170,7 @@ function App() {
           placeholder="Enter clinical question (e.g., ‘Adult with COPD exacerbation in ED’)"
         />
         <div className="options">
-          <label>
+          <label className={`option ${includeLocal ? "option--active" : ""}`}>
             <input
               type="checkbox"
               checked={includeLocal}
@@ -178,7 +178,7 @@ function App() {
             />
             Local
           </label>
-          <label>
+          <label className={`option ${includeNational ? "option--active" : ""}`}>
             <input
               type="checkbox"
               checked={includeNational}
@@ -186,7 +186,7 @@ function App() {
             />
             National
           </label>
-          <label>
+          <label className={`option ${includeLiterature ? "option--active" : ""}`}>
             <input
               type="checkbox"
               checked={includeLiterature}
