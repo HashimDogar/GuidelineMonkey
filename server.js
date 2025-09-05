@@ -3,6 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const JSON5 = require('json5');
 
 const localDir = path.join(__dirname, 'local_ocr');
 const frontendDir = path.join(__dirname, 'frontend');
@@ -22,52 +23,44 @@ function findLocalGuidelines(query) {
 const norm = s =>
   (s || '').toLowerCase().replace(/[\s_-]+/g, '').replace(/[^a-z0-9]/g, '');
 
-  async function callPhi3Structured(userQuery, localTitles) {
-    const prompt = `
-  You are Guideline Monkey. Answer UK-clinically with priority: Local → NICE → Cochrane.
-  Return ONLY a single minified JSON object. No markdown. No code fences. No comments. No trailing commas.
-  
-  Schema:
-  {
-    "summary": string,
-    "local": {
-      "guideline": {
-        "title": string,
-        "summary": string,
-        "url": string,
-        "applicability": "specific" | "most_applicable" | "none"
-      },
-      "decision_tree": [{"if": string, "then": string, "note"?: string}],
-      "recommended_investigations": string[],
-      "recommended_management": string[],
-      "links": [{"title": string, "url": string}]
-    },
-    "national": {
-      "decision_tree": [{"if": string, "then": string, "note"?: string}],
-      "nice_summary": string,
-      "recommended_investigations": string[],
-      "recommended_management": string[],
-      "cks_link": string
-    },
-    "systematic_review": {
-      "summary": string,
-      "link": string,
-      "citation"?: string
-    }
+async function callPhi3Structured(userQuery, localTitles, include = {}) {
+  const sections = [];
+  if (include.local) {
+    sections.push(`"local": {\n      "guideline": {"title": string, "summary": string, "url": string, "applicability": "specific" | "most_applicable" | "none"},\n      "decision_tree": [{"if": string, "then": string, "note"?: string}],\n      "recommended_investigations": string[],\n      "recommended_management": string[],\n      "links": [{"title": string, "url": string}]\n    }`);
   }
-  
+  if (include.national) {
+    sections.push(`"national": {\n      "decision_tree": [{"if": string, "then": string, "note"?: string}],\n      "nice_summary": string,\n      "recommended_investigations": string[],\n      "recommended_management": string[],\n      "cks_link": string\n    }`);
+  }
+  const schema = `{
+    "summary": string${sections.length ? ',\n    ' + sections.join(',\n    ') : ''}
+  }`;
+
+  let rules = `- Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.\n- Output MUST be strictly valid JSON.`;
+  if (include.local || include.national) {
+    const bind = [];
+    if (include.local) bind.push('local');
+    if (include.national) bind.push('national');
+    rules = `- Bind ${bind.join(' + ')} guidance in the top-level "summary" (2–5 sentences).` +
+      (include.local ? `\n- Local: If a specific local guideline exists, set applicability="specific"; else use the most applicable and set applicability="most_applicable"; if none, set applicability="none".\n- Provide a practical decision_tree of IF/THEN steps (2–6 items).` : '') +
+      (include.national ? `\n- National: Summarise NICE for the exact query; list investigations and management succinctly; include the most relevant NICE CKS link.` : '') +
+      `\n- Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.\n- Output MUST be strictly valid JSON.`;
+  }
+
+  const priority = [include.local && 'Local', include.national && 'NICE'].filter(Boolean).join(' → ');
+
+  const prompt = `
+  You are Guideline Monkey. Answer UK-clinically with priority: ${priority}.
+  Return ONLY a single minified JSON object. No markdown. No code fences. No comments. No trailing commas.
+
+  Schema:
+  ${schema}
+
   Rules:
-  - Bind local + national guidance in the top-level "summary" (2–5 sentences). Cite key RCTs or reviews briefly.
-  - Local: If a specific local guideline exists, set applicability="specific"; else use the most applicable and set applicability="most_applicable"; if none, set applicability="none".
-  - Provide a practical decision_tree of IF/THEN steps (2–6 items).
-  - National: Summarise NICE for the exact query; list investigations and management succinctly; include the most relevant NICE CKS link.
-  - Systematic_review: Select the single most relevant Cochrane review and summarise.
-  - Use UK terminology (BNF/NICE). Prefer concise bullet phrases. No unsafe or speculative recommendations.
-  - Output MUST be strictly valid JSON.
-  
+  ${rules}
+
   User query:
   ${userQuery}
-  
+
   Available local guideline titles (choose one if applicable; use the exact title):
   ${localTitles.map(t => `- ${t}`).join('\n')}
   `;
@@ -124,8 +117,29 @@ const norm = s =>
     console.error('Model output (first 800 chars):\n', raw.slice(0, 800));
     throw new Error('Model did not return valid JSON.');
   }
-  
 
+async function fetchPubMed(query) {
+  try {
+    const term = encodeURIComponent(query);
+    const searchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${term}&retmode=json&retmax=3&sort=cited`;
+    const sResp = await fetch(searchUrl);
+    if (!sResp.ok) return [];
+    const sData = await sResp.json();
+    const ids = sData.esearchresult?.idlist || [];
+    if (!ids.length) return [];
+    const summaryUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${ids.join(',')}&retmode=json`;
+    const sumResp = await fetch(summaryUrl);
+    if (!sumResp.ok) return [];
+    const sumData = await sumResp.json();
+    return ids.map(id => ({
+      title: sumData.result?.[id]?.title || `PubMed ${id}`,
+      url: `https://pubmed.ncbi.nlm.nih.gov/${id}/`
+    }));
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+}
 
 // ---- server ----
 const server = http.createServer(async (req, res) => {
@@ -137,58 +151,64 @@ const server = http.createServer(async (req, res) => {
     req.on('data', c => (body += c));
     req.on('end', async () => {
       try {
-        const { prompt = '' } = JSON.parse(body || '{}');
+        const { prompt = '', include = {} } = JSON.parse(body || '{}');
+        const incLocal = include.local !== false;
+        const incNational = include.national !== false;
+        const incLiterature = include.literature !== false;
         if (!prompt.trim()) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ error: 'Missing prompt' }));
         }
 
-        // 1) find local PDFs
-        const localMatches = findLocalGuidelines(prompt);
+        // 1) find local PDFs if needed
+        const localMatches = incLocal ? findLocalGuidelines(prompt) : [];
         const localTitles = localMatches.map(g => g.title);
 
-        // 2) ask Phi-3 for the STRUCTURED JSON
-        let out = await callPhi3Structured(prompt, localTitles);
+        // 2) ask model for structured JSON if local or national requested
+        let out = {};
+        if (incLocal || incNational) {
+          out = await callPhi3Structured(prompt, localTitles, { local: incLocal, national: incNational });
+        }
 
-        // 3) enrich/merge with real local links (+ sensible fallbacks)
         out = out && typeof out === 'object' ? out : {};
-        out.local = out.local && typeof out.local === 'object' ? out.local : {};
 
-        // attach up to 3 local links from real files
-        const links = localMatches.slice(0, 3).map(({ title, link }) => ({ title, url: link }));
-        out.local.links = links;
+        // 3) enrich local results
+        if (incLocal) {
+          out.local = out.local && typeof out.local === 'object' ? out.local : {};
+          const links = localMatches.slice(0, 3).map(({ title, link }) => ({ title, url: link }));
+          out.local.links = links;
 
-        // if model picked a local guideline by title, attach its real /local URL
-        if (out.local.guideline && out.local.guideline.title && !out.local.guideline.url) {
-          const m = localMatches.find(f => norm(f.title) === norm(out.local.guideline.title));
-          if (m) out.local.guideline.url = m.link;
+          if (out.local.guideline && out.local.guideline.title && !out.local.guideline.url) {
+            const m = localMatches.find(f => norm(f.title) === norm(out.local.guideline.title));
+            if (m) out.local.guideline.url = m.link;
+          }
+
+          if (!out.local.guideline) {
+            out.local.guideline = {
+              title: localMatches[0]?.title || 'No applicable local guideline',
+              summary: localMatches.length ? 'Most applicable local document selected by filename match.' : '',
+              url: localMatches[0]?.link || '',
+              applicability: localMatches.length ? 'most_applicable' : 'none'
+            };
+          }
+        } else {
+          delete out.local;
         }
 
-        // if model said no applicable guideline, ensure a minimal shape
-        if (!out.local.guideline) {
-          out.local.guideline = {
-            title: localMatches[0]?.title || 'No applicable local guideline',
-            summary: localMatches.length ? 'Most applicable local document selected by filename match.' : '',
-            url: localMatches[0]?.link || '',
-            applicability: localMatches.length ? 'most_applicable' : 'none'
-          };
+        // 4) national fallbacks
+        if (incNational) {
+          out.national = out.national && typeof out.national === 'object' ? out.national : {};
+          if (!out.national.cks_link) {
+            out.national.cks_link = `https://cks.nice.org.uk/search?query=${encodeURIComponent(prompt)}`;
+          }
+        } else {
+          delete out.national;
         }
 
-        // national fallbacks
-        out.national = out.national && typeof out.national === 'object' ? out.national : {};
-        if (!out.national.cks_link) {
-          out.national.cks_link = `https://cks.nice.org.uk/search?query=${encodeURIComponent(prompt)}`;
-        }
-
-        // systematic review fallback
-        out.systematic_review =
-          out.systematic_review && typeof out.systematic_review === 'object'
-            ? out.systematic_review
-            : {};
-        if (!out.systematic_review.link) {
-          out.systematic_review.link = `https://www.cochranelibrary.com/search?searchPhrase=${encodeURIComponent(
-            prompt
-          )}`;
+        // 5) published literature
+        if (incLiterature) {
+          const papers = await fetchPubMed(prompt);
+          out.published_literature = { papers };
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

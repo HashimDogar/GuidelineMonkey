@@ -83,6 +83,11 @@ function App() {
   const [error, setError] = React.useState(null);
   const [elapsed, setElapsed] = React.useState(0);
   const timerRef = React.useRef(null);
+  const controllerRef = React.useRef(null);
+
+  const [includeLocal, setIncludeLocal] = React.useState(true);
+  const [includeNational, setIncludeNational] = React.useState(true);
+  const [includeLiterature, setIncludeLiterature] = React.useState(true);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -90,20 +95,35 @@ function App() {
     setError(null);
     setResult(null);
     setElapsed(0);
+    const controller = new AbortController();
+    controllerRef.current = controller;
     try {
       const res = await fetch("/api/guidelines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({
+          prompt,
+          include: {
+            local: includeLocal,
+            national: includeNational,
+            literature: includeLiterature
+          }
+        }),
+        signal: controller.signal
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setResult(data);
     } catch (err) {
-      console.error(err);
-      setError("Request failed. Please try again.");
+      if (err.name === "AbortError") {
+        setError("Search cancelled.");
+      } else {
+        console.error(err);
+        setError("Request failed. Please try again.");
+      }
     } finally {
       setLoading(false);
+      controllerRef.current = null;
     }
   }
 
@@ -119,6 +139,12 @@ function App() {
     return () => clearInterval(timerRef.current);
   }, [loading]);
 
+  function handleStop() {
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+    }
+  }
+
   function formatElapsed(seconds) {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -133,7 +159,7 @@ function App() {
       <header className="app-header">
         <div>
           <h1 className="app-title">Guideline Monkey</h1>
-          <p className="app-subtitle">Local → NICE → Cochrane — concise, actionable guidance</p>
+          <p className="app-subtitle">Local → NICE → literature — concise, actionable guidance</p>
         </div>
       </header>
 
@@ -143,9 +169,40 @@ function App() {
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Enter clinical question (e.g., ‘Adult with COPD exacerbation in ED’)"
         />
+        <div className="options">
+          <label>
+            <input
+              type="checkbox"
+              checked={includeLocal}
+              onChange={(e) => setIncludeLocal(e.target.checked)}
+            />
+            Local
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeNational}
+              onChange={(e) => setIncludeNational(e.target.checked)}
+            />
+            National
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeLiterature}
+              onChange={(e) => setIncludeLiterature(e.target.checked)}
+            />
+            Published literature
+          </label>
+        </div>
         <button type="submit" disabled={loading || !prompt.trim()}>
           {loading ? "Searching…" : "Search"}
         </button>
+        {loading && (
+          <button type="button" onClick={handleStop}>
+            Stop
+          </button>
+        )}
       </form>
 
       {loading && <div className="status">Loading… {formatElapsed(elapsed)}</div>}
@@ -157,118 +214,110 @@ function App() {
       {result && (
         <div className="results-grid">
           {/* SUMMARY */}
-          <Card title="Summary" className="card--summary">
-            {result.summary ? (
+          {result.summary && (
+            <Card title="Summary" className="card--summary">
               <p className="m6">{result.summary}</p>
-            ) : (
-              <p className="small">No summary returned.</p>
-            )}
-          </Card>
+            </Card>
+          )}
 
           {/* LOCAL */}
-          <Card
-            title="Local guidelines"
-            headerExtras={
-              result?.local?.guideline?.applicability ? (
-                <div className="badges">
-                  <ApplicabilityBadge applicability={result.local.guideline.applicability} />
-                </div>
-              ) : null
-            }
-          >
-            {result?.local?.guideline && (
-              <>
-                <p className="m6">
-                  <strong>{result.local.guideline.title}</strong>
-                  {result.local.guideline.url ? (
-                    <> — <a className="link-muted" href={result.local.guideline.url} target="_blank" rel="noreferrer">Open</a></>
-                  ) : null}
-                </p>
-                {result.local.guideline.summary && (
-                  <p className="small m8">{result.local.guideline.summary}</p>
-                )}
-                <hr className="sep" />
-              </>
-            )}
+          {result.local && (
+            <Card
+              title="Local guidelines"
+              headerExtras={
+                result?.local?.guideline?.applicability ? (
+                  <div className="badges">
+                    <ApplicabilityBadge applicability={result.local.guideline.applicability} />
+                  </div>
+                ) : null
+              }
+            >
+              {result?.local?.guideline && (
+                <>
+                  <p className="m6">
+                    <strong>{result.local.guideline.title}</strong>
+                    {result.local.guideline.url ? (
+                      <> — <a className="link-muted" href={result.local.guideline.url} target="_blank" rel="noreferrer">Open</a></>
+                    ) : null}
+                  </p>
+                  {result.local.guideline.summary && (
+                    <p className="small m8">{result.local.guideline.summary}</p>
+                  )}
+                  <hr className="sep" />
+                </>
+              )}
 
-            {result?.local?.decision_tree && result.local.decision_tree.length > 0 && (
-              <>
-                <h3 className="m6">Decision tree</h3>
-                <DecisionTree steps={result.local.decision_tree} />
-              </>
-            )}
+              {result?.local?.decision_tree && result.local.decision_tree.length > 0 && (
+                <>
+                  <h3 className="m6">Decision tree</h3>
+                  <DecisionTree steps={result.local.decision_tree} />
+                </>
+              )}
 
-            {(result?.local?.recommended_investigations || result?.local?.investigations) && (
-              <>
-                <h3 className="m8">Recommended investigations</h3>
-                <Bullets items={result.local.recommended_investigations || result.local.investigations} />
-              </>
-            )}
+              {(result?.local?.recommended_investigations || result?.local?.investigations) && (
+                <>
+                  <h3 className="m8">Recommended investigations</h3>
+                  <Bullets items={result.local.recommended_investigations || result.local.investigations} />
+                </>
+              )}
 
-            {(result?.local?.recommended_management || result?.local?.management) && (
-              <>
-                <h3 className="m8">Recommended management</h3>
-                <Bullets items={result.local.recommended_management || result.local.management} />
-              </>
-            )}
+              {(result?.local?.recommended_management || result?.local?.management) && (
+                <>
+                  <h3 className="m8">Recommended management</h3>
+                  <Bullets items={result.local.recommended_management || result.local.management} />
+                </>
+              )}
 
-            {(result?.local?.links || Array.isArray(result?.local)) && (
-              <>
-                <h3 className="m8">Links (top 3)</h3>
-                {Array.isArray(result?.local)
-                  ? <LinkList items={result.local} />
-                  : <LinkList items={result.local.links} />}
-              </>
-            )}
-          </Card>
+              {(result?.local?.links || Array.isArray(result?.local)) && (
+                <>
+                  <h3 className="m8">Links (top 3)</h3>
+                  {Array.isArray(result?.local)
+                    ? <LinkList items={result.local} />
+                    : <LinkList items={result.local.links} />}
+                </>
+              )}
+            </Card>
+          )}
 
           {/* NATIONAL */}
-          <Card title="National guidelines (NICE)">
-            {result?.national?.nice_summary && <p className="m6">{result.national.nice_summary}</p>}
-            {(result?.national?.recommended_investigations || result?.national?.investigations) && (
-              <>
-                <h3 className="m8">Recommended investigations</h3>
-                <Bullets items={result.national.recommended_investigations || result.national.investigations} />
-              </>
-            )}
-            {(result?.national?.recommended_management || result?.national?.management) && (
-              <>
-                <h3 className="m8">Recommended management</h3>
-                <Bullets items={result.national.recommended_management || result.national.management} />
-              </>
-            )}
-            {result?.national?.cks_link && (
-              <p className="m8">
-                <a className="link" href={result.national.cks_link} target="_blank" rel="noreferrer">
-                  NICE CKS — most relevant page
-                </a>
-              </p>
-            )}
+          {result.national && (
+            <Card title="National guidelines (NICE)">
+              {result?.national?.nice_summary && <p className="m6">{result.national.nice_summary}</p>}
+              {(result?.national?.recommended_investigations || result?.national?.investigations) && (
+                <>
+                  <h3 className="m8">Recommended investigations</h3>
+                  <Bullets items={result.national.recommended_investigations || result.national.investigations} />
+                </>
+              )}
+              {(result?.national?.recommended_management || result?.national?.management) && (
+                <>
+                  <h3 className="m8">Recommended management</h3>
+                  <Bullets items={result.national.recommended_management || result.national.management} />
+                </>
+              )}
+              {result?.national?.cks_link && (
+                <p className="m8">
+                  <a className="link" href={result.national.cks_link} target="_blank" rel="noreferrer">
+                    NICE CKS — most relevant page
+                  </a>
+                </p>
+              )}
 
-            {/* Back-compat */}
-            {Array.isArray(result?.national) && <LinkList items={result.national} />}
-          </Card>
+              {/* Back-compat */}
+              {Array.isArray(result?.national) && <LinkList items={result.national} />}
+            </Card>
+          )}
 
-          {/* SYSTEMATIC REVIEW */}
-          <Card title="Systematic review (Cochrane)">
-            {result?.systematic_review?.summary ? (
-              <p className="m6">{result.systematic_review.summary}</p>
-            ) : <p className="small">No summary returned.</p>}
-
-            {result?.systematic_review?.citation && (
-              <p className="small muted">{result.systematic_review.citation}</p>
-            )}
-            {result?.systematic_review?.link && (
-              <p className="m8">
-                <a className="link" href={result.systematic_review.link} target="_blank" rel="noreferrer">
-                  Open systematic review
-                </a>
-              </p>
-            )}
-
-            {/* Back-compat */}
-            {Array.isArray(result?.systematic_reviews) && <LinkList items={result.systematic_reviews} />}
-          </Card>
+          {/* PUBLISHED LITERATURE */}
+          {result.published_literature && (
+            <Card title="Published literature">
+              {result.published_literature.papers && result.published_literature.papers.length > 0 ? (
+                <LinkList items={result.published_literature.papers} />
+              ) : (
+                <p className="small">No literature found.</p>
+              )}
+            </Card>
+          )}
         </div>
       )}
     </div>
